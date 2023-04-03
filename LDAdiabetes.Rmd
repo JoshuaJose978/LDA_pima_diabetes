@@ -1,0 +1,179 @@
+---
+title: 'Linear Discriminant Analysis on Pima Diabetes Data'
+author: "Joshua Jose"
+date: "2023-03-23"
+output:
+  pdf_document: default
+  html_document: default
+---
+Aim
+---
+To develop a model that helps us identify if a particular person has diabetes or not(diabetes=1,no diabetes=0)based on the medical readings collected(glucose levels, Insulin levels,Age...).
+
+Data Description
+----------
+
+The Diabetes data set contains the variables
+
++ Pregnancies - No of times the person has been pregnant.
++ Glucose - Plasma glucose concentration at 2 hours in an oral glucose tolerance test.
++ BloodPressure - Diastolic blood pressure (mm Hg).
++ SkinThickness - Triceps skin fold thickness (mm).
++ Insulin - 2-Hour serum insulin (mu U/ml).
++ BMI - Body mass index (weight in kg/(height in metres squared)).
++ DiabetesPedigreeFunction - Diabetes pedigree function.
++ Age - Age (years)
++ Outcome - test whether the patient shows signs of diabetes (coded 0 if negative, 1 if positive)
+
+**The data set contains a lot of observations with value 0 in the Glucose, BloodPressure, SkinThickness, Insulin, BMI, DiabetesPedigreeFunction and Age columns. These all seem to be observations where the reading are not noted down. In that case, we can either omit these entire rows or we can impute using the 'missForest' package , in order to get a good model.**
+
+Theory
+----
+
+Linear discriminant analysis(LDA) is used as a tool for classification.
+Decision theory for classification tells us that we need to know the class 
+posteriors $Pr(G \mid X)$ for optimal classiﬁcation. Suppose $f_k(x)$ is
+the class-conditional density of $X$ in class $G = k$, and let $\pi_k$ be the prior 
+probability of class $k$, with $\sum_{k = 1}^{K}\pi_k=1$. A simple application of Bayes
+theorem gives us
+$$Pr(G=k \mid X=x) = \frac{f_k(x)\pi_k}{\sum_{l = 1}^{K} f_l(x)\pi_l}$$
+In this case we have more than one predictors(Pregnancies,Glucose, BloodPressure, SkinThickness...) we will assume that $X = (X_1,X_2,...,X_p)$ is drawn from a multivariate  Gaussian (or multivariate normal) distribution, with a class-specific
+multivariate mean vector and a common covariance matrix. This is important as Linear discriminant analysis (LDA) works on the basis of a few assumptions
+
++ Sample measurements are independent from each other.
++ We model each class density as multivariate Gaussian,another way of saying it is
+that the predictors are multivariate normal conditioned on the classes.
+$$X \mid Y=k \sim N_p(\mu_k,\Sigma)$$
+$$f_k(x) = \frac{1}{(2\pi)^{p/2}|\Sigma_k|^{1/2}}e^{-\frac{1}{2}(x-\mu_k)^T\Sigma_k^{-1}(x-\mu_k)}$$
++ the classes have a common covariance matrix $\Sigma_k = \Sigma \; \forall k$.
+
+In comparing two classes $k$ and $l$, it is suﬃcient to look at the log-ratio, and
+we see that 
+$$log\frac{Pr(G=k \mid X=x)}{Pr(G=l \mid X=x)}=log\frac{f_k(x)}{f_l(x)}+log\frac{\pi_k}{\pi_l}$$
+where the decision boundary(for class k and class l) is at 0.
+So, Decision Boundary:
+\begin{align*}
+log\frac{f_k(x)}{f_l(x)}+log\frac{\pi_k}{\pi_l}=0\\
+=>log\frac{\pi_k}{\pi_l}-\frac{1}{2}(\mu_k^T\Sigma^{-1}\mu_k-\mu_l^T\Sigma^{-1}\mu_l)+(\mu_k-\mu_l)^T\Sigma^{-1}x=0\\
+=>(\mu_k-\mu_l)^T\Sigma^{-1}x=\frac{1}{2}(\mu_k^T\Sigma^{-1}\mu_k-\mu_l^T\Sigma^{-1}\mu_l)-log\frac{\pi_k}{\pi_l}
+\end{align*}
+
+In practice we do not know the parameters of the Gaussian distributions,
+and will need to estimate them using our training data:
+
++ $\hat{\pi}_k=N_k/N$ where $N_k$ is the number of class-$k$ observations;
++ $\hat{\mu}_k =\sum_{g_i=k} x_i/N_k$
++ $\hat{\Sigma}=\sum_{k=1}^{K}\sum_{g_i=k} (x_i-\hat{\mu}_k)(x_i-\hat{\mu}_k)^T/(N-K)$
+
+With two classes there is a simple correspondence between linear discriminant analysis and classiﬁcation by linear least squares, The LDA rule classiﬁes to class 2 if
+$$x^T\hat{\Sigma}^{-1}(\hat{\mu}_l-\hat{\mu}_k)>\frac{1}{2}\hat{\mu}_l^T\hat{\Sigma}^{-1}\hat{\mu}_l-\frac{1}{2}\hat{\mu}_k^T\hat{\Sigma}^{-1}\hat{\mu}_l+log\frac{N_k}{N}-log\frac{N_l}{N}$$
+and class 1 otherwise.
+
+Data Imputation
+----
+
+```{r}
+library("MASS")
+library("missForest")
+library("twinning")
+library("ROCR")
+library("mice")
+```
+Loading the data set and checking out how it looks
+```{r}
+diabetes = read.csv("diabetes.csv")
+head(diabetes)
+dim(diabetes)
+str(diabetes)
+```
+The unnoted observations that are currently filled with 0 have to be filed with NA instead of 0.
+We don't apply it for the 8th column, since that's a factor output.
+```{r}
+diabetes[, 2:7][diabetes[, 2:7] == 0] <- NA
+head(diabetes)
+```
+Checking the pattern of the missing data
+```{r}
+md.pattern(diabetes)
+```
+There are no NA values in the columns: Pregnancies, DiabetesPedigreeFunction, Age, Outcome.There are 5 NA values for Glucose, 11 NA values for BMI, 35 NA values for BloodPressure,227 NA values for SkinThickness and 374 NA values for Insulin, which leads to a total of 652 NA's.
+
+Missing data pattern by variable pairs
+```{r}
+p <- md.pairs(diabetes); p
+```
+
+We are using the 'missForest' package for imputing the NA values in our data set.
+```{r}
+set.seed(287)
+imp_diabetes <- missForest(diabetes)
+```
+
+We don't use the 'mice' package to impute the values since, 'mice' function creates 
+multiply imputed data sets(mids), the lda() function doesn't accept all the mids and later allow us to make a pooled model(like what can be done with lm() function)
+
+The normalized root mean squared error (NRMSE) is defined as:
+$$\sqrt{\frac{mean((X_{true}-X_{imp})^2)}{var(X_{True})}}$$
+The NRMSE in this case can be calculated by
+```{r}
+imp_diabetes$OOBerror
+```
+
+Data Partition and Modeling
+-----
+```{r}
+set.seed(673)
+twin_indices = twin(imp_diabetes$ximp, r=5)
+diabetes_test = imp_diabetes$ximp[twin_indices, ]
+diabetes_train = imp_diabetes$ximp[-twin_indices, ]
+```
+Training the model
+```{r}
+lda_model <- MASS::lda(Outcome ~., data = diabetes_train)
+preds_train <- predict(lda_model) 
+head(preds_train$posterior)
+```
+The output above shows the probabilities of being classified into the 'Diabetes'(1) or 'No Diabetes'(0) group. For example, observation one has not been tested positive for diabetes with a probability of 98%. Observation two has been diagnosed with diabetes with a probability of 87%. The model uses a 50% threshold for the posterior probabilities.
+```{r}
+lda_model
+```
+From our output we can read off the prior probabilities $\pi_1$ = 0.347 and $\pi_2$ = 0.653. This means that around 34.7% of our data set includes people who have been diagnosed with diabetes and 65.3% who have not been diagnosed with diabetes.
+```{r}
+plot(lda_model)
+```
+
+More specifically, the scores, or coefficients of the output of the linear discriminant, are a linear combination that forms the LDA decision rule. When the linear combination of these coefficients is negative, then the probability increases that observation has diabetes (see plot), whereas when the linear combination is positive, observation is more likely to belong to the “No Diabetes” group.
+
+Using the posterior for the test set we try predicting whether they will have diabetes or not
+```{r}
+preds_test <- predict(lda_model,diabetes_test) 
+head(preds_test$posterior)
+```
+Validating the model using the test set, we use a confusion matrix to tabulate our finding
+```{r}
+diabetes_test <- data.frame(diabetes_test, predicted = preds_test$class) 
+xtabs(~ predicted + Outcome, data = diabetes_test)
+```
+```{r}
+# prediction accuracy 
+round((89+31)/(154), 4)
+```
+The prediction accuracy is 77.92% if the threshold for the posterior is 0.5.
+```{r}
+ROCPred <- prediction(preds_test$posterior[,2], diabetes_test$Outcome)
+ROCPer <- performance(ROCPred, measure = "tpr", x.measure = "fpr")
+auc <- performance(ROCPred, measure = "auc")
+auc <- auc@y.values[[1]]
+auc
+```
+
+```{r}
+plot(ROCPer, colorize = TRUE,
+print.cutoffs.at = seq(0.1, by = 0.1),
+main = "ROC CURVE")
+abline(a = 0, b = 1)
+auc <- round(auc, 4)
+legend(.6, .4, auc, title = "AUC", cex = 1)
+```
+
+We have an AUC of about 87.05%, which considerably good for predicting whether a person has a possibility of having diabetes in the next few years.
