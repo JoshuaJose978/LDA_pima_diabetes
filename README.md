@@ -1,4 +1,4 @@
-# LDA_pima_diabetes
+# LDA on pima diabetes data(in R)
 Using LDA to help us identify if a particular person has diabetes or not based on the person's medical records.
 
 The Project was executed using R programming language. 
